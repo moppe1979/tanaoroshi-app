@@ -111,9 +111,13 @@ tr.mine td:nth-child(6){box-shadow:inset 0 0 0 999px var(--yellow)}
 .pop{position:fixed;left:50%;bottom:calc(72px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;z-index:70;max-width:90vw}
 @media (min-width:900px){
  body{padding-bottom:0;padding-left:0}
- .tabs{position:sticky;top:calc(44px + env(safe-area-inset-top,0px));bottom:auto;border-top:0;border-bottom:1px solid var(--line);padding:0 16px;z-index:25}
+ main{padding-top:44px}
+ .tabs{position:fixed;top:calc(44px + env(safe-area-inset-top,0px));bottom:auto;border-top:0;border-bottom:1px solid var(--line);padding:0 16px;z-index:25}
  .tabs button{flex:0 0 auto;padding:0 24px;height:44px}
  .filters{top:calc(88px + env(safe-area-inset-top,0px))}
  .sheet{align-items:center}.sheet-body{border-radius:16px}
 }
 @media (prefers-reduced-motion:reduce){.flash.go{animation:none}}
+
+.cover{display:none}
+@media (min-width:900px){.cover{display:flex;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}.cover img{border-radius:8px;background:#fff;flex:none}.cover p{margin:4px 0}}
