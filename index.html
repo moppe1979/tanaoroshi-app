@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f5d4d">
+<title>棚卸アプリ</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">棚卸アプリ</div>
+  <div class="progress" aria-live="polite"><span id="pDone">0</span> / <span id="pAll">0</span> 件<span class="bar"><i id="pBar"></i></span></div>
+</header>
+
+<main>
+<!-- ============ スキャン ============ -->
+<section id="v-scan" class="view">
+  <div class="cam">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="reticle"></div>
+    <div class="flash" id="flash"></div>
+    <div class="camstate" id="camState">カメラを準備中</div>
+    <button class="startcam" id="btnStartCam" hidden>カメラを開始</button>
+    <div class="hud" id="hud">QR・バーコードを枠に合わせてください</div>
+  </div>
+  <div class="actions">
+    <button id="btnManual" class="btn">手入力</button>
+    <button id="btnOcr" class="btn">文字を読む(OCR)</button>
+    <button id="btnTorch" class="btn" hidden>ライト</button>
+    <button id="btnCamToggle" class="btn ghost">停止</button>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="cur" class="cur" hidden>
+    <div class="cur-head">
+      <div>
+        <div class="cur-code" id="curCode"></div>
+        <div class="cur-name" id="curName"></div>
+        <div class="cur-sub" id="curSub"></div>
+      </div>
+      <div class="cur-method" id="curMethod"></div>
+    </div>
+    <div class="seg" id="curGen" role="group" aria-label="現物">
+      <button data-v="有">有</button><button data-v="確認中">確認中</button><button data-v="無">無</button>
+    </div>
+    <div class="cur-foot">
+      <button id="btnShot" class="btn primary">写真を追加</button>
+      <span id="curPhotos" class="cur-info"></span>
+      <button id="btnUndo" class="btn ghost">取消</button>
+    </div>
+    <div class="cur-info" id="curLoc"></div>
+  </div>
+  <div id="nolist" class="empty" hidden>
+    <p>先に棚卸リスト(xlsm / xlsx)を読み込んでください。</p>
+    <button class="btn primary" data-goto="settings">設定へ</button>
+  </div>
+</section>
+
+<!-- ============ 一覧 ============ -->
+<section id="v-list" class="view" hidden>
+  <div class="filters">
+    <input type="search" id="fq" placeholder="資産コード・名称・機番・置場で検索" aria-label="検索">
+    <select id="fgen" aria-label="現物">
+      <option value="">現物: すべて</option>
+      <option value="__blank">未回答(空欄)</option>
+      <option value="有">有</option><option value="確認中">確認中</option><option value="無">無</option>
+      <option value="__mine">今回の回答分</option>
+      <option value="__nophoto">写真なし</option>
+    </select>
+    <select id="fdept" aria-label="所属"></select>
+    <select id="floc" aria-label="所在地"></select>
+  </div>
+  <div class="count" id="listCount"></div>
+  <div class="tablewrap">
+    <table id="tbl">
+      <thead><tr>
+        <th data-sort="code">資産コード</th><th data-sort="name">名称</th><th>置場・担当者</th><th>型式</th>
+        <th data-sort="dept">所属</th><th data-sort="gen">現物</th><th>機番</th><th>位置</th><th>写真</th><th data-sort="time">記録時刻</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <button id="btnMore" class="btn ghost more" hidden>さらに表示</button>
+</section>
+
+<!-- ============ 設定・出力 ============ -->
+<section id="v-settings" class="view" hidden>
+  <div class="panel">
+    <h2>棚卸リスト</h2>
+    <p class="note" id="listInfo">未読み込み</p>
+    <label class="btn primary filebtn">リスト(xlsm / xlsx)を読み込む<input type="file" id="fileList" accept=".xlsm,.xlsx"></label>
+    <p class="note">リストは端末のブラウザ内にだけ保存され、サーバーには送信されません。読み込み直すと回答データは残り、リスト側のみ更新されます。</p>
+  </div>
+  <div class="panel">
+    <h2>出力</h2>
+    <button class="btn primary" id="btnExcel">回答済みExcelを出力(変更セルは黄色)</button>
+    <button class="btn" id="btnZip">写真ZIPを出力</button>
+    <button class="btn" id="btnCsv">記録CSV(位置・写真名)を出力</button>
+    <p class="note" id="expInfo"></p>
+  </div>
+  <div class="panel">
+    <h2>読取の設定</h2>
+    <label class="check"><input type="checkbox" id="sAutoOcr" checked> 読めない時は自動でOCRを試す</label>
+    <label class="check"><input type="checkbox" id="sSound" checked> 読取時に音とバイブ</label>
+    <label class="check"><input type="checkbox" id="sPhoto" checked> 読取時に写真を自動撮影</label>
+  </div>
+  <div class="panel">
+    <h2>保存状況</h2>
+    <p class="note" id="storeInfo"></p>
+    <button class="btn danger" id="btnReset">回答データをすべて削除</button>
+    <div id="resetConfirm" hidden class="confirm">
+      <p>回答・位置・写真をすべて削除します。出力済みか確認してください。</p>
+      <button class="btn danger" id="btnResetYes">削除する</button>
+      <button class="btn ghost" id="btnResetNo">やめる</button>
+    </div>
+  </div>
+</section>
+</main>
+
+<nav class="tabs" aria-label="画面切替">
+  <button data-tab="scan" class="on">スキャン</button>
+  <button data-tab="list">一覧</button>
+  <button data-tab="settings">設定・出力</button>
+</nav>
+
+<!-- 手入力シート -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-body">
+    <div class="sheet-head"><b>手入力</b><button class="btn ghost" id="sheetClose">閉じる</button></div>
+    <input type="text" id="manualIn" placeholder="資産コード・機番・名称の一部" autocapitalize="characters" autocomplete="off" enterkeyhint="done">
+    <ul id="manualSug" class="sug"></ul>
+  </div>
+</div>
+
+<!-- OCR候補 -->
+<div id="ocrSheet" class="sheet" hidden>
+  <div class="sheet-body">
+    <div class="sheet-head"><b id="ocrTitle">OCR結果</b><button class="btn ghost" id="ocrClose">閉じる</button></div>
+    <p class="note" id="ocrText"></p>
+    <ul id="ocrSug" class="sug"></ul>
+    <button class="btn" id="ocrManual">手入力に切り替える</button>
+  </div>
+</div>
+
+<!-- 詳細 -->
+<div id="detail" class="sheet" hidden>
+  <div class="sheet-body wide">
+    <div class="sheet-head"><b id="dCode"></b><button class="btn ghost" id="dClose">閉じる</button></div>
+    <div id="dInfo" class="dinfo"></div>
+    <div class="seg" id="dGen"><button data-v="有">有</button><button data-v="確認中">確認中</button><button data-v="無">無</button><button data-v="">空欄に戻す</button></div>
+    <div id="dPhotos" class="gallery"></div>
+    <label class="btn filebtn">写真を追加(撮影・ファイル)<input type="file" id="dFile" accept="image/*" multiple></label>
+  </div>
+</div>
+
+<div id="pop" class="pop" hidden></div>
+
+<script src="vendor/zxing.min.js"></script>
+<script src="vendor/exceljs.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
