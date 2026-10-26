@@ -55,8 +55,9 @@
     <div class="cur-info" id="curLoc"></div>
   </div>
   <div id="nolist" class="empty" hidden>
-    <p>先に棚卸リスト(xlsm / xlsx)を読み込んでください。</p>
-    <button class="btn primary" data-goto="settings">設定へ</button>
+    <p><b>リストを受け取ります</b><br>管理者から渡された「パスワードQRコード」を、上のカメラで読み取ってください。</p>
+    <button class="btn" id="btnPwManual">パスワードを手入力</button>
+    <button class="btn ghost" data-goto="settings">ファイルから読み込む(管理者)</button>
   </div>
 </section>
 
@@ -94,6 +95,24 @@
     <p class="note" id="listInfo">未読み込み</p>
     <label class="btn primary filebtn">リスト(xlsm / xlsx)を読み込む<input type="file" id="fileList" accept=".xlsm,.xlsx"></label>
     <p class="note">リストは端末のブラウザ内にだけ保存され、サーバーには送信されません。読み込み直すと回答データは残り、リスト側のみ更新されます。</p>
+  </div>
+  <div class="panel" id="distPanel">
+    <h2>スマホへ配布(管理者)</h2>
+    <p class="note">リストを読み込むたびに、8桁のパスワードを新しく作り、リストを暗号化して公開サイトに置きます。スマホは、下のパスワードQRを読み取るだけでリストを受け取れます。</p>
+    <div id="distOut" hidden class="distout">
+      <img id="pwQr" width="220" height="220" alt="パスワードQRコード">
+      <div><div class="cur-info">パスワード</div><div class="cur-code" id="pwText"></div><div class="cur-info" id="pwInfo"></div></div>
+    </div>
+    <p class="note" id="distStatus">リストを読み込むと、ここにQRコードが出ます。</p>
+    <button class="btn" id="btnReissue">パスワードを再発行して公開</button>
+    <button class="btn ghost" id="btnEncSave">暗号化リスト(list.enc)を保存</button>
+    <details><summary class="note">GitHubの自動公開の設定</summary>
+      <label class="note" for="ghToken">アクセストークン(Contents: Read and write)</label>
+      <input type="password" id="ghToken" class="txt" autocomplete="off" placeholder="github_pat_...">
+      <label class="note" for="ghRepo">公開先(owner/repo)</label>
+      <input type="text" id="ghRepo" class="txt" autocomplete="off">
+      <p class="note">トークンはこのPCのブラウザにだけ保存されます。未設定の場合は、list.encを保存して、GitHubに手動でアップロードしてください。</p>
+    </details>
   </div>
   <div class="panel">
     <h2>出力</h2>
@@ -162,6 +181,7 @@
 <script src="vendor/zxing.min.js"></script>
 <script src="vendor/exceljs.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

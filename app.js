@@ -46,7 +46,7 @@ async function importList(file){
   const rows=[];
   ws.eachRow({includeEmpty:false},(row,n)=>{ if(n===1) return; const arr=[]; for(let c=1;c<=ncol;c++) arr.push(cellVal(row.getCell(c).value)); if(arr[0]) rows.push(arr); });
   await DB.put('meta',{header,rows,filename:file.name,sheet:ws.name,at:Date.now()},'list');
-  await loadList(); renderAll();
+  await loadList(); renderAll(); await distribute();
 }
 async function loadList(){
   const m=await DB.get('meta','list'); state.meta=m||null;
@@ -110,7 +110,7 @@ async function initDetector(){
 }
 function scheduleDetect(){ clearTimeout(detLoop); if(camOn) detLoop=setTimeout(detectOnce,detector?110:160); }
 async function detectOnce(){
-  if(!camOn||document.hidden||state.tab!=='scan'||!state.rows.length||sheetOpen()){ return scheduleDetect(); }
+  if(!camOn||document.hidden||state.tab!=='scan'||sheetOpen()){ return scheduleDetect(); }
   try{
     let text=null;
     if(video.readyState>=2){
@@ -147,6 +147,7 @@ function resolveText(text){
 }
 const recentSeen=new Map();
 async function onText(text,method){
+  if(String(text).startsWith('TNPW1:')){ const pw=String(text).slice(6).trim(); const now=Date.now(); if(recentSeen.get('pw'+pw)>now-8000) return; recentSeen.set('pw'+pw,now); return receiveList(pw); }
   const {rows,raw}=resolveText(text);
   if(rows.length){ const r=rows[0]; const now=Date.now(); if(recentSeen.get(r.code)>now-4000) return; recentSeen.set(r.code,now); return recordScan(r,method); }
   if(raw.length){ const c=raw[0], now=Date.now(); if(recentSeen.get(c)>now-6000) return; recentSeen.set(c,now); beep(false); showToast(`リストにありません: ${c}`,'bad',{label:'リスト外として登録',fn:()=>recordUnlisted(c,method)}); }
@@ -374,8 +375,63 @@ async function exportZip(){
   finally{ $('btnZip').disabled=false; }
 }
 
+
+/* ---------------- リスト配布(暗号化) ---------------- */
+const KEEP=['資産コード','名称','置場・担当者','型式','現物','所属','所在地','備考'];
+const PW_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const PBKDF2_ITER=300000;
+const b64=u8=>{let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
+const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+function genPassword(){ const r=new Uint32Array(8); crypto.getRandomValues(r); return [...r].map(x=>PW_CHARS[x%PW_CHARS.length]).join(''); }
+async function deriveKey(pw,salt){ const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:PBKDF2_ITER,hash:'SHA-256'},k,{name:'AES-GCM',length:256},false,['encrypt','decrypt']); }
+async function gz(u8,dir){ if(typeof CompressionStream==='undefined') return null; const s=new Blob([u8]).stream().pipeThrough(new (dir==='c'?CompressionStream:DecompressionStream)('gzip')); return new Uint8Array(await new Response(s).arrayBuffer()); }
+async function encryptList(meta,pw){
+  const idx=KEEP.map(k=>meta.header.indexOf(k));
+  const payload={header:KEEP,rows:meta.rows.map(r=>idx.map(i=>i<0?'':r[i])),filename:meta.filename,sheet:meta.sheet,at:Date.now()};
+  let raw=new TextEncoder().encode(JSON.stringify(payload)); let z=false; const c=await gz(raw,'c'); if(c){raw=c;z=true;}
+  const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12)), key=await deriveKey(pw,salt);
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,raw));
+  return JSON.stringify({v:1,z,iter:PBKDF2_ITER,salt:b64(salt),iv:b64(iv),data:b64(ct),at:payload.at});
+}
+async function decryptList(text,pw){
+  const o=JSON.parse(text); const key=await deriveKey(pw,unb64(o.salt));
+  let raw=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(o.iv)},key,unb64(o.data)));
+  if(o.z){ raw=await gz(raw,'d'); if(!raw) throw new Error('この端末は圧縮データを展開できません'); }
+  return JSON.parse(new TextDecoder().decode(raw));
+}
+async function receiveList(pw){
+  if(receiveList.busy) return; receiveList.busy=true;
+  try{
+    showToast('リストを受け取り中…','ok');
+    const res=await fetch('list.enc?ts='+Date.now(),{cache:'no-store'}); if(!res.ok) throw new Error('list.enc が見つかりません');
+    let p; try{ p=await decryptList(await res.text(),pw); }catch(e){ if(e.message&&e.message.includes('圧縮')) throw e; throw new Error('パスワードが合いません。新しいQRを読み取ってください'); }
+    await DB.put('meta',{header:p.header,rows:p.rows,filename:p.filename,sheet:p.sheet,at:p.at,received:true},'list');
+    await loadList(); renderAll(); beep(true); showToast(`リストを受け取りました(${state.rows.length.toLocaleString()}件)`,'ok');
+  }catch(e){ beep(false); showToast(e.message||'受け取れませんでした','bad'); }
+  finally{ receiveList.busy=false; }
+}
+function qrDataUrl(text){ const q=qrcode(0,'M'); q.addData(text); q.make(); return q.createDataURL(8,4); }
+let lastEnc=null;
+async function distribute(){
+  const meta=state.meta; if(!meta){ $('distStatus').textContent='先にリストを読み込んでください。'; return; }
+  $('distStatus').textContent='暗号化しています…';
+  const pw=genPassword(); lastEnc=await encryptList(meta,pw);
+  $('distOut').hidden=false; $('pwQr').src=qrDataUrl('TNPW1:'+pw); $('pwText').textContent=pw; $('pwInfo').textContent=fmtFull(Date.now())+' 発行';
+  const tok=$('ghToken').value.trim(), repo=$('ghRepo').value.trim();
+  if(!tok){ $('distStatus').textContent='パスワードを作りました。list.encを保存して、GitHubのリポジトリに上書きアップロードしてください(自動公開を使うには、下の設定にトークンを入れます)。'; return; }
+  try{
+    const api=`https://api.github.com/repos/${repo}/contents/list.enc`, hd={Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'};
+    let sha; const g=await fetch(api,{headers:hd,cache:'no-store'}); if(g.ok) sha=(await g.json()).sha; else if(g.status!==404) throw new Error('GitHubに接続できません('+g.status+')');
+    const put=await fetch(api,{method:'PUT',headers:hd,body:JSON.stringify({message:'リスト更新 '+fmtFull(Date.now()),content:b64(new TextEncoder().encode(lastEnc)),sha})});
+    if(!put.ok) throw new Error('公開に失敗しました('+put.status+')。トークンの権限を確認してください');
+    $('distStatus').textContent='公開しました。反映まで1〜2分かかります。反映後に、このQRをスマホで読み取ってください。';
+  }catch(e){ $('distStatus').textContent=e.message+'。list.encを保存して、手動でアップロードしてください。'; }
+}
+
 /* ---------------- 設定 ---------------- */
-function loadSettings(){ try{ Object.assign(state.settings,JSON.parse(localStorage.getItem('tn-settings')||'{}')); }catch(e){}
+function loadSettings(){ try{ $('ghToken').value=localStorage.getItem('tn-gh-token')||''; const rp=localStorage.getItem('tn-gh-repo'); $('ghRepo').value=rp||(location.hostname.endsWith('github.io')?location.hostname.split('.')[0]+'/'+(location.pathname.split('/')[1]||''):''); }catch(e){}
+  try{ Object.assign(state.settings,JSON.parse(localStorage.getItem('tn-settings')||'{}')); }catch(e){}
   $('sAutoOcr').checked=state.settings.autoOcr; $('sSound').checked=state.settings.sound; $('sPhoto').checked=state.settings.photo; }
 function saveSettings(){ state.settings={autoOcr:$('sAutoOcr').checked,sound:$('sSound').checked,photo:$('sPhoto').checked}; try{ localStorage.setItem('tn-settings',JSON.stringify(state.settings)); }catch(e){} }
 async function renderStore(){
@@ -415,6 +471,9 @@ async function init(){
   $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(tr) openDetail(tr.dataset.code); };
   document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{ const k=th.dataset.sort; state.sort=state.sort.k===k?{k,d:-state.sort.d}:{k,d:1}; renderList(); });
   $('fileList').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $('listInfo').textContent='読み込み中…'; try{ await importList(f); pop('リストを読み込みました'); }catch(err){ $('listInfo').textContent='読み込めませんでした: '+err.message; } e.target.value=''; };
+  $('btnReissue').onclick=distribute; $('btnEncSave').onclick=()=>{ if(!lastEnc) return pop('先にパスワードを発行してください'); download(new Blob([lastEnc],{type:'application/json'}),'list.enc'); };
+  $('ghToken').onchange=()=>{ try{localStorage.setItem('tn-gh-token',$('ghToken').value.trim())}catch(e){} }; $('ghRepo').onchange=()=>{ try{localStorage.setItem('tn-gh-repo',$('ghRepo').value.trim())}catch(e){} };
+  $('btnPwManual').onclick=()=>{ openPwSheet(); };
   $('btnExcel').onclick=exportExcel; $('btnZip').onclick=exportZip; $('btnCsv').onclick=exportCsv;
   ['sAutoOcr','sSound','sPhoto'].forEach(id=>$(id).onchange=saveSettings);
   $('btnReset').onclick=()=>$('resetConfirm').hidden=false; $('btnResetNo').onclick=()=>$('resetConfirm').hidden=true;
@@ -425,3 +484,6 @@ async function init(){
   window.__app={state,onText,recordScan,resolveText,ocrCandidates,runOcr};
 }
 init();
+
+function restoreManual(){ $('manualIn').oninput=e=>renderSug(e.target.value); $('manualIn').placeholder='資産コード・機番・名称の一部'; $('sheetClose').onclick=()=>$('sheet').hidden=true; }
+function openPwSheet(){ $('sheet').hidden=false; $('manualIn').value=''; $('manualIn').placeholder='8桁のパスワード'; $('manualSug').innerHTML=''; const b=document.createElement('li'); const bt=document.createElement('button'); bt.textContent='このパスワードでリストを受け取る'; bt.onclick=()=>{ const v=$('manualIn').value.trim(); if(v){ $('sheet').hidden=true; restoreManual(); receiveList(v);} }; b.appendChild(bt); $('manualSug').appendChild(b); $('manualIn').oninput=null; setTimeout(()=>$('manualIn').focus(),50); $('sheetClose').onclick=()=>{$('sheet').hidden=true; restoreManual();}; }
