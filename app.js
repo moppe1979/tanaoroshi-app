@@ -191,11 +191,11 @@ async function setGen(r,v){
   }
   renderProgress(); invalidateList(); if(state.cur&&state.cur.code===r.code) showCur();
 }
-async function undoCurrent(){
-  const r=state.cur; if(!r) return; const rec=state.rec.get(r.code); if(!rec) return;
+async function undoCurrent(rowArg){
+  const r=rowArg||state.cur; if(!r) return; const rec=state.rec.get(r.code); if(!rec) return;
   const ps=await DB.byCode(r.code); for(const p of ps) await DB.del('photos',p.name);
   await DB.del('records',r.code); state.rec.delete(r.code); recentSeen.delete(r.code);
-  state.cur=null; $('cur').hidden=true; showToast(`${r.code} の記録を取り消しました`,'warn'); renderProgress(); invalidateList();
+  if(state.cur&&state.cur.code===r.code) state.cur=null; renderRecent(); showToast(`${r.code} の記録を取り消しました`,'warn'); renderProgress(); invalidateList();
 }
 
 /* ---------------- スキャン画面UI ---------------- */
@@ -204,15 +204,23 @@ function showToast(msg,kind='ok',action){
   if(action){ const b=document.createElement('button'); b.className='btn'; b.textContent=action.label; b.onclick=()=>{t.hidden=true;action.fn()}; t.appendChild(b); }
   clearTimeout(showToast.t); showToast.t=setTimeout(()=>{t.hidden=true},action?7000:3500);
 }
-function showCur(){
-  const r=state.cur; if(!r){ $('cur').hidden=true; return; }
-  const rec=state.rec.get(r.code)||{photos:[]};
-  $('cur').hidden=false; $('curCode').textContent=r.code; $('curName').textContent=r.name; $('curSub').textContent=[r.place,r.dept].filter(Boolean).join(' / ');
-  $('curMethod').textContent=rec.method||''; const g=genOf(r.unlisted?{code:r.code,gen0:''}:r);
-  [...$('curGen').children].forEach(b=>b.classList.toggle('on',b.dataset.v===g));
-  const np=(rec.photos||[]).length; $('curPhotos').textContent=np?`写真 ${np}枚 (${rec.photos[rec.photos.length-1]})`:'写真なし';
-  $('curLoc').textContent=rec.lat!=null?`位置 ${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)} (±${rec.acc}m) ${fmtTime(rec.time)}`:(rec.time?'位置情報なし':'');
+function showCur(){ renderRecent(); }
+function renderRecent(){
+  const ul=$('recent'); ul.innerHTML='';
+  const recs=[...state.rec.values()].filter(r=>r.time).sort((a,b)=>b.time-a.time);
+  $('recentCount').textContent=recs.length?`${recs.length}件`:'';
+  const cur=state.cur; $('btnShot').disabled=!cur||!state.rec.get(cur.code); $('btnEdit').disabled=!cur;
+  $('nolist').hidden=state.rows.length>0; $('recent').hidden=state.rows.length===0;
+  recs.slice(0,30).forEach(rc=>{ const r=state.byCode.get(rc.code)||{code:rc.code,name:'(リスト外)',place:'',dept:'',unlisted:true};
+    const li=document.createElement('li'); const b=document.createElement('button'); b.type='button'; b.className='rc'+(cur&&cur.code===rc.code?' on':'');
+    const c=document.createElement('b'); c.textContent=rc.code; const n=document.createElement('span'); n.className='rn'; n.textContent=r.name;
+    const m=document.createElement('span'); m.className='rm'; const g=rc.gen&&rc.gen!=='有'?rc.gen:''; m.textContent=[g,(rc.photos||[]).length+'枚',fmtTime(rc.time).split(' ')[1]].filter(Boolean).join(' ');
+    if(g) li.classList.add('flag');
+    b.append(c,n,m); b.onclick=()=>{ state.cur=r; renderRecent(); }; li.appendChild(b); ul.appendChild(li); });
+  fitRecent();
 }
+function fitRecent(){ const ul=$('recent'); if(!ul||window.innerWidth>=900) return; [...ul.children].forEach(li=>li.hidden=false); const lim=ul.getBoundingClientRect().bottom; [...ul.children].forEach(li=>{ if(li.getBoundingClientRect().bottom>lim+1) li.hidden=true; }); }
+window.addEventListener('resize',()=>fitRecent());
 function renderProgress(){
   const n=state.rows.length; let done=0; state.rows.forEach(r=>{ const rc=state.rec.get(r.code); if(rc&&rc.time&&rc.listed!==false) done++; });
   $('pDone').textContent=done; $('pAll').textContent=n; $('pBar').style.width=n?(done/n*100)+'%':'0';
@@ -267,7 +275,7 @@ async function runOcr(auto=false){
     else if(cands.length>1){ showOcrSheet(cands,text); }
     else if(!auto){ showOcrSheet([],text); }
   }catch(e){ if(!auto) pop('OCRを実行できませんでした'); }
-  finally{ ocrBusy=false; $('btnOcr').disabled=false; $('btnOcr').textContent='文字を読む(OCR)'; if(camOn) $('camState').textContent='読取中'; }
+  finally{ ocrBusy=false; $('btnOcr').disabled=false; $('btnOcr').textContent='OCR'; if(camOn) $('camState').textContent='読取中'; }
 }
 function showOcrSheet(cands,text){
   $('ocrSheet').hidden=false; $('ocrTitle').textContent=cands.length?'候補を選んでください':'コードを読み取れませんでした';
@@ -439,7 +447,7 @@ async function renderStore(){
   let t=''; try{ const e=await navigator.storage.estimate(); t=`端末内の使用量: ${(e.usage/1048576).toFixed(1)}MB`; }catch(e){}
   const np=(await DB.all('photos')).length; $('storeInfo').textContent=`記録 ${recordRows().length}件 / 写真 ${np}枚 ${t}`;
 }
-function renderAll(){ fillSelects(); renderProgress(); const has=state.rows.length>0; $('nolist').hidden=has; $('btnManual').disabled=!has; renderStore(); invalidateList(); if(state.tab==='scan') showCur(); }
+function renderAll(){ fillSelects(); renderProgress(); const has=state.rows.length>0; $('btnManual').disabled=!has; renderStore(); invalidateList(); renderRecent(); }
 
 /* ---------------- タブ ---------------- */
 function goTab(t){
@@ -462,10 +470,10 @@ async function init(){
   $('btnOcr').onclick=()=>runOcr(false); $('ocrClose').onclick=()=>$('ocrSheet').hidden=true; $('ocrManual').onclick=()=>{$('ocrSheet').hidden=true;openManual()};
   $('btnCamToggle').onclick=()=>camOn?stopCam():startCam(); $('btnStartCam').onclick=startCam;
   $('btnTorch').onclick=async()=>{ try{ torchOn=!torchOn; await stream.getVideoTracks()[0].applyConstraints({advanced:[{torch:torchOn}]}); $('btnTorch').classList.toggle('primary',torchOn);}catch(e){} };
-  $('btnShot').onclick=addPhotoForCurrent; $('btnUndo').onclick=undoCurrent;
-  $('curGen').onclick=e=>{ const v=e.target.dataset&&e.target.dataset.v; if(v!=null&&state.cur) setGen(state.cur.unlisted?{code:state.cur.code,unlisted:true}:state.cur,v); };
+  $('btnShot').onclick=addPhotoForCurrent; $('btnEdit').onclick=()=>{ if(state.cur) openDetail(state.cur.code); };
+  $('dUndo').onclick=async()=>{ if(detailRow){ await undoCurrent(detailRow); $('detail').hidden=true; } };
   $('dGen').onclick=e=>{ const v=e.target.dataset&&e.target.dataset.v; if(v!=null) setGen(detailRow,v).then(renderDetail); };
-  $('dClose').onclick=()=>$('detail').hidden=true; $('dFile').onchange=async e=>{ await addFilesToDetail([...e.target.files]); e.target.value=''; };
+  $('dClose').onclick=()=>{ $('detail').hidden=true; renderRecent(); }; $('dFile').onchange=async e=>{ await addFilesToDetail([...e.target.files]); e.target.value=''; };
   ['fq','fgen','fdept','floc'].forEach(id=>$(id).addEventListener(id==='fq'?'input':'change',()=>renderList()));
   $('btnMore').onclick=()=>{ state.limit+=300; renderList(true); };
   $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(tr) openDetail(tr.dataset.code); };
@@ -477,7 +485,7 @@ async function init(){
   $('btnExcel').onclick=exportExcel; $('btnZip').onclick=exportZip; $('btnCsv').onclick=exportCsv;
   ['sAutoOcr','sSound','sPhoto'].forEach(id=>$(id).onchange=saveSettings);
   $('btnReset').onclick=()=>$('resetConfirm').hidden=false; $('btnResetNo').onclick=()=>$('resetConfirm').hidden=true;
-  $('btnResetYes').onclick=async()=>{ await DB.clear('records'); await DB.clear('photos'); state.rec.clear(); state.cur=null; $('cur').hidden=true; $('resetConfirm').hidden=true; recentSeen.clear(); renderAll(); pop('回答データを削除しました'); };
+  $('btnResetYes').onclick=async()=>{ await DB.clear('records'); await DB.clear('photos'); state.rec.clear(); state.cur=null; renderRecent(); $('resetConfirm').hidden=true; recentSeen.clear(); renderAll(); pop('回答データを削除しました'); };
   document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopCam(); else if(state.tab==='scan') startCam(); });
   renderAll(); goTab('scan');
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});

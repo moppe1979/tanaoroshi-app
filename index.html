@@ -25,39 +25,25 @@
     <div class="reticle"></div>
     <div class="flash" id="flash"></div>
     <div class="camstate" id="camState">カメラを準備中</div>
+    <div class="camtools"><button id="btnTorch" class="mini" hidden>ライト</button><button id="btnCamToggle" class="mini">停止</button></div>
     <button class="startcam" id="btnStartCam" hidden>カメラを開始</button>
     <div class="hud" id="hud">QR・バーコードを枠に合わせてください</div>
+    <div id="toast" class="toast" hidden></div>
   </div>
   <div class="actions">
+    <button id="btnOcr" class="btn">OCR</button>
     <button id="btnManual" class="btn">手入力</button>
-    <button id="btnOcr" class="btn">文字を読む(OCR)</button>
-    <button id="btnTorch" class="btn" hidden>ライト</button>
-    <button id="btnCamToggle" class="btn ghost">停止</button>
+    <button id="btnShot" class="btn" disabled>写真追加</button>
+    <button id="btnEdit" class="btn" disabled>編集</button>
   </div>
-  <div id="toast" class="toast" hidden></div>
-  <div id="cur" class="cur" hidden>
-    <div class="cur-head">
-      <div>
-        <div class="cur-code" id="curCode"></div>
-        <div class="cur-name" id="curName"></div>
-        <div class="cur-sub" id="curSub"></div>
-      </div>
-      <div class="cur-method" id="curMethod"></div>
+  <div class="recent-wrap">
+    <div class="recent-head"><span>読取履歴</span><span id="recentCount"></span></div>
+    <ul id="recent" class="recent"></ul>
+    <div id="nolist" class="empty" hidden>
+      <p><b>リストを受け取ります</b><br>管理者から渡された「パスワードQRコード」を、上のカメラで読み取ってください。</p>
+      <button class="btn" id="btnPwManual">パスワードを手入力</button>
+      <button class="btn ghost" data-goto="settings">ファイルから読み込む(管理者)</button>
     </div>
-    <div class="seg" id="curGen" role="group" aria-label="現物">
-      <button data-v="有">有</button><button data-v="確認中">確認中</button><button data-v="無">無</button>
-    </div>
-    <div class="cur-foot">
-      <button id="btnShot" class="btn primary">写真を追加</button>
-      <span id="curPhotos" class="cur-info"></span>
-      <button id="btnUndo" class="btn ghost">取消</button>
-    </div>
-    <div class="cur-info" id="curLoc"></div>
-  </div>
-  <div id="nolist" class="empty" hidden>
-    <p><b>リストを受け取ります</b><br>管理者から渡された「パスワードQRコード」を、上のカメラで読み取ってください。</p>
-    <button class="btn" id="btnPwManual">パスワードを手入力</button>
-    <button class="btn ghost" data-goto="settings">ファイルから読み込む(管理者)</button>
   </div>
 </section>
 
@@ -172,6 +158,7 @@
     <div id="dInfo" class="dinfo"></div>
     <div class="seg" id="dGen"><button data-v="有">有</button><button data-v="確認中">確認中</button><button data-v="無">無</button><button data-v="">空欄に戻す</button></div>
     <div id="dPhotos" class="gallery"></div>
+    <button class="btn danger" id="dUndo">この記録を取り消す(写真・位置も削除)</button>
     <label class="btn filebtn">写真を追加(撮影・ファイル)<input type="file" id="dFile" accept="image/*" multiple></label>
   </div>
 </div>

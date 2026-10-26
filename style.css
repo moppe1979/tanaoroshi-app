@@ -123,3 +123,27 @@ tr.mine td:nth-child(6){box-shadow:inset 0 0 0 999px var(--yellow)}
 @media (min-width:900px){.cover{display:flex;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}.cover img{border-radius:8px;background:#fff;flex:none}.cover p{margin:4px 0}}
 
 .distout{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.distout img{background:#fff;border-radius:8px;padding:4px}.txt{display:block;width:100%;height:44px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:0 10px;margin:4px 0 8px;font-size:16px}details summary{cursor:pointer;min-height:36px;display:flex;align-items:center}
+
+/* --- スキャン画面(スクロールなしの構成) --- */
+.camtools{position:absolute;top:8px;right:8px;display:flex;gap:6px}
+.mini{min-height:32px;padding:0 10px;border-radius:6px;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:600;cursor:pointer}
+.cam .toast{position:absolute;left:8px;right:8px;bottom:8px;z-index:3;background:var(--surface);color:var(--fg);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.actions{grid-template-columns:repeat(4,1fr)}
+.actions .btn{padding:0 4px;white-space:nowrap}
+.recent-wrap{min-height:0;flex:1;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.recent-head{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.recent{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;overflow:hidden;min-height:0}
+.rc{width:100%;display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-height:48px;cursor:pointer}
+.rc b{font-family:var(--mono);font-size:15px}
+.rc .rn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.rc .rm{font-size:11px;color:var(--muted);white-space:nowrap}
+.rc.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent);background:var(--soft)}
+li.flag .rm{color:var(--warn);font-weight:700}
+@media (max-width:899px){
+ body:has(#v-scan:not([hidden])){overflow:hidden}
+ #v-scan{max-width:none;height:calc(100dvh - 40px - 56px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));padding-top:8px;padding-bottom:8px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+ #v-scan[hidden]{display:none}
+ #v-scan .cam{flex:0 0 42%;aspect-ratio:auto;max-height:none;min-height:0}
+ #v-scan .actions{flex:0 0 auto}
+ .actions .btn{min-height:48px}
+}
