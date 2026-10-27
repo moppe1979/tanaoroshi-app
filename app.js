@@ -83,7 +83,7 @@ async function startCam(){
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     video.srcObject=stream; await video.play(); camOn=true; lastDetect=Date.now();
-    $('btnStartCam').hidden=true; $('camState').textContent='読取中'; $('hud').textContent='QR・バーコードを枠に合わせてください'; $('btnCamToggle').textContent='停止';
+    $('btnStartCam').hidden=true; $('camState').textContent='読取中'; $('hud').textContent='QR・バーコード、または機械番号の1行を枠に合わせてください'; $('btnCamToggle').textContent='停止';
     const tr=stream.getVideoTracks()[0]; const cap=tr.getCapabilities?tr.getCapabilities():{};
     $('btnTorch').hidden=!cap.torch;
     try{ if(cap.focusMode&&cap.focusMode.includes('continuous')) await tr.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(e){}
@@ -123,7 +123,7 @@ async function detectOnce(){
       }
     }
     if(text) { lastDetect=Date.now(); await onText(text,'QR/バーコード'); }
-    else if(state.settings.autoOcr&&Date.now()-lastDetect>5000&&!ocrBusy&&!sheetOpen()){ lastDetect=Date.now(); runOcr(true); }
+    else if(state.settings.autoOcr&&Date.now()-lastDetect>3000&&!ocrBusy&&!sheetOpen()){ lastDetect=Date.now(); runOcr(true); }
   }catch(e){}
   scheduleDetect();
 }
@@ -246,7 +246,7 @@ async function getWorker(){
   if(typeof Tesseract==='undefined') await new Promise((ok,ng)=>{ const s=document.createElement('script'); s.src='vendor/tess/tesseract.min.js'; s.onload=ok; s.onerror=ng; document.head.appendChild(s); });
   const base=new URL('vendor/tess/',location.href).href;
   ocrWorker=await Tesseract.createWorker('eng',1,{workerPath:base+'worker.min.js',corePath:base,langPath:base,gzip:true,workerBlobURL:false});
-  await ocrWorker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',tessedit_pageseg_mode:'11'});
+  await ocrWorker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',tessedit_pageseg_mode:'7'});
   return ocrWorker;
 }
 function fixCode(w){
@@ -264,14 +264,49 @@ function ocrCandidates(text){
   }
   return [...out.values()];
 }
+
+/* 枠(上側の1行分)だけを切り出してOCRに渡す。写真は全体のまま */
+function reticleRegion(){
+  const cam=document.querySelector('.cam').getBoundingClientRect(), r=document.querySelector('.reticle').getBoundingClientRect();
+  const vw=video.videoWidth, vh=video.videoHeight; if(!vw||!cam.width) return null;
+  const sc=Math.max(cam.width/vw,cam.height/vh), ox=(vw*sc-cam.width)/2, oy=(vh*sc-cam.height)/2;
+  let x=((r.left-cam.left)+ox)/sc, y=((r.top-cam.top)+oy)/sc, w=r.width/sc, h=r.height/sc;
+  x=Math.max(0,x); y=Math.max(0,y); w=Math.min(vw-x,w); h=Math.min(vh-y,h); return {x,y,w,h};
+}
+function prepOcrCanvas(src,sx,sy,sw,sh){
+  const sc=Math.min(3,Math.max(1,1400/sw)); const c=document.createElement('canvas'); c.width=Math.round(sw*sc); c.height=Math.round(sh*sc);
+  const g=c.getContext('2d',{willReadFrequently:true}); g.drawImage(src,sx,sy,sw,sh,0,0,c.width,c.height);
+  const im=g.getImageData(0,0,c.width,c.height), d=im.data, n=c.width*c.height, hist=new Uint32Array(256);
+  for(let i=0;i<n;i++){ const y=(d[i*4]*.299+d[i*4+1]*.587+d[i*4+2]*.114)|0; d[i*4]=y; hist[y]++; }
+  let lo=0,hi=255,acc=0; for(;lo<255;lo++){ acc+=hist[lo]; if(acc>n*.02) break; } acc=0; for(;hi>0;hi--){ acc+=hist[hi]; if(acc>n*.02) break; }
+  const span=Math.max(40,hi-lo); for(let i=0;i<n;i++){ const v=Math.max(0,Math.min(255,((d[i*4]-lo)*255/span)|0)); d[i*4]=d[i*4+1]=d[i*4+2]=v; d[i*4+3]=255; }
+  g.putImageData(im,0,0); return c;
+}
+function cropCanvas(c,fx){ const o=document.createElement('canvas'); const x=Math.round(c.width*fx); o.width=c.width-x; o.height=c.height; o.getContext('2d').drawImage(c,x,0,o.width,o.height,0,0,o.width,o.height); return o; }
+function fuzzyCandidates(text){
+  const out=new Map(); const toks=norm(text).split(/[^A-Z0-9]+/).filter(t=>t.length>=5&&t.length<=12);
+  const lines=norm(text).split(/\n/).map(l=>l.replace(/[^A-Z0-9]/g,'')).filter(l=>l.length>=5&&l.length<=14);
+  for(const t of [...toks,...lines]){ for(const r of state.rows){ const c=r.code; if(c.length<8||!t.includes(c.slice(-4))) continue;
+      let k=0; for(const ch of c.slice(0,-4)){ const i=t.indexOf(ch,k); if(i>=0) k=i+1; else if(false) break; }
+      let n=0,p=0; for(const ch of c.slice(0,-4)){ const i=t.indexOf(ch,p); if(i>=0){n++;p=i+1;} }
+      if(n>=2) out.set(c,r); } }
+  return [...out.values()].slice(0,6);
+}
+async function ocrOnCanvas(c){
+  const w=await getWorker(); let text='', cands=[], all='';
+  for(const v of [c,cropCanvas(c,.38)]){
+    for(const psm of ['7','6']){ await w.setParameters({tessedit_pageseg_mode:psm}); const res=await w.recognize(v); text=res.data.text||''; all+=text+'\n'; cands=ocrCandidates(text); if(cands.length) return {text,cands,fuzzy:false}; }
+  }
+  return {text:all,cands:fuzzyCandidates(all),fuzzy:true};
+}
 async function runOcr(auto=false){
   if(ocrBusy) return; ocrBusy=true;
   if(!auto) { $('btnOcr').disabled=true; $('btnOcr').textContent='読み取り中…'; } else $('camState').textContent='OCR中';
   try{
-    let blob=await grabFrame(1400,0.9); if(!blob){ if(!auto) pop('カメラが動いていません'); return; }
-    const w=await getWorker(); const res=await w.recognize(blob); const text=res.data.text||'';
-    const cands=ocrCandidates(text);
-    if(cands.length===1){ const r=cands[0]; lastDetect=Date.now(); const now=Date.now(); if(!(recentSeen.get(r.code)>now-4000)){ recentSeen.set(r.code,now); await recordScan(r,'OCR'); } }
+    const rg=(camOn&&video.readyState>=2)?reticleRegion():null; if(!rg){ if(!auto) pop('カメラが動いていません'); return; }
+    const {text,cands,fuzzy}=await ocrOnCanvas(prepOcrCanvas(video,rg.x,rg.y,rg.w,rg.h));
+    if(fuzzy){ if(!auto) showOcrSheet(cands,text); }
+    else if(cands.length===1){ const r=cands[0]; lastDetect=Date.now(); const now=Date.now(); if(!(recentSeen.get(r.code)>now-4000)){ recentSeen.set(r.code,now); await recordScan(r,'OCR'); } }
     else if(cands.length>1){ showOcrSheet(cands,text); }
     else if(!auto){ showOcrSheet([],text); }
   }catch(e){ if(!auto) pop('OCRを実行できませんでした'); }
@@ -490,7 +525,7 @@ async function init(){
   document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopCam(); else if(state.tab==='scan') startCam(); });
   renderAll(); goTab('scan');
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
-  window.__app={state,onText,recordScan,resolveText,ocrCandidates,runOcr};
+  window.__app={state,onText,recordScan,resolveText,ocrCandidates,runOcr,prepOcrCanvas,ocrOnCanvas};
 }
 init();
 

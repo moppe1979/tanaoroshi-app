@@ -28,7 +28,7 @@ main{width:100%;max-width:1400px;margin:0 auto}
 #v-scan{max-width:720px;margin:0 auto;display:grid;gap:10px}
 .cam{position:relative;background:var(--cam);border-radius:12px;overflow:hidden;aspect-ratio:4/3;max-height:52vh;width:100%}
 .cam video{width:100%;height:100%;object-fit:cover;display:block}
-.reticle{position:absolute;inset:18% 12%;border:2px solid rgba(255,255,255,.85);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.28);pointer-events:none}
+.reticle{position:absolute;inset:18% 12% 50% 12%;border:2px solid rgba(255,255,255,.85);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.28);pointer-events:none}
 .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
 .flash.go{animation:fl .35s ease-out}
 @keyframes fl{0%{opacity:.8}100%{opacity:0}}
