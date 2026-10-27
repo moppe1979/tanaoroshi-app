@@ -3,7 +3,7 @@
 const $ = id => document.getElementById(id);
 const COLS = {code:'資産コード', name:'名称', place:'置場・担当者', type:'型式', gen:'現物', dept:'所属', loc:'所在地', kiban:'原始管理番号', note:'備考'};
 const state = {rows:[], header:[], idx:{}, byCode:new Map(), byKiban:new Map(), rec:new Map(), cur:null, meta:null,
-  settings:{autoOcr:true, sound:true, photo:true}, sort:{k:'code',d:1}, limit:200, tab:'scan'};
+  settings:{autoOcr:true, sound:true, photo:true, photoSize:'max'}, sort:{k:'code',d:1}, limit:200, tab:'scan'};
 
 /* ---------------- IndexedDB ---------------- */
 const DB = {
@@ -81,7 +81,7 @@ const zxCanvas=document.createElement('canvas'); let detector=null, zxReader=nul
 async function startCam(){
   if(camOn) return;
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:4096},height:{ideal:2160}},audio:false});
     video.srcObject=stream; await video.play(); camOn=true; lastDetect=Date.now();
     $('btnStartCam').hidden=true; $('camState').textContent='読取中'; $('hud').textContent='QR・バーコード、または機械番号の1行を枠に合わせてください'; $('btnCamToggle').textContent='停止';
     const tr=stream.getVideoTracks()[0]; const cap=tr.getCapabilities?tr.getCapabilities():{};
@@ -114,7 +114,7 @@ async function detectOnce(){
   try{
     let text=null;
     if(video.readyState>=2){
-      if(detector){ const r=await detector.detect(video); if(r.length) text=r[0].rawValue; }
+      if(detector){ const vw=video.videoWidth, vh=video.videoHeight, sc=Math.min(1,1280/Math.max(vw,vh)); zxCanvas.width=Math.round(vw*sc); zxCanvas.height=Math.round(vh*sc); zxCanvas.getContext('2d').drawImage(video,0,0,zxCanvas.width,zxCanvas.height); const r=await detector.detect(zxCanvas); if(r.length) text=r[0].rawValue; }
       else if(zxReader){
         const vw=video.videoWidth, vh=video.videoHeight, sc=Math.min(1,1000/Math.max(vw,vh));
         zxCanvas.width=Math.round(vw*sc); zxCanvas.height=Math.round(vh*sc);
@@ -132,6 +132,23 @@ function grabFrame(maxSide=1920,q=0.85){
   return new Promise(res=>{ if(!camOn||video.readyState<2) return res(null);
     const vw=video.videoWidth, vh=video.videoHeight, sc=Math.min(1,maxSide/Math.max(vw,vh)); const c=document.createElement('canvas'); c.width=Math.round(vw*sc); c.height=Math.round(vh*sc);
     c.getContext('2d').drawImage(video,0,0,c.width,c.height); c.toBlob(b=>res(b),'image/jpeg',q); });
+}
+
+/* 保存する写真: カメラの最大サイズ。ImageCaptureが使えれば撮像素子の最大解像度、使えなければ映像そのままの大きさ */
+let imgCap=null;
+async function grabPhoto(){
+  if(state.settings.photoSize==='std') return grabFrame(1920,0.85);
+  const tr=stream&&stream.getVideoTracks()[0];
+  if(tr&&'ImageCapture' in window){
+    try{
+      if(!imgCap||imgCap.track!==tr) imgCap=new ImageCapture(tr);
+      const caps=await imgCap.getPhotoCapabilities(); const opt={};
+      if(caps.imageWidth&&caps.imageHeight){ opt.imageWidth=caps.imageWidth.max; opt.imageHeight=caps.imageHeight.max; }
+      const blob=await Promise.race([imgCap.takePhoto(opt),new Promise((_,ng)=>setTimeout(()=>ng(new Error('timeout')),4000))]);
+      if(blob&&blob.size>0) return blob;
+    }catch(e){}
+  }
+  return grabFrame(100000,0.92);
 }
 function flash(){ const f=$('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
 
@@ -161,7 +178,7 @@ async function recordScan(r,method,{noPhoto=false}={}){
   let rec=state.rec.get(r.code);
   const isNew=!rec||!rec.time;
   if(!isNew){ state.cur=r; showCur(); beep(true); showToast(`記録済み: ${r.code}`,'warn'); return; }
-  const blob=(state.settings.photo&&!noPhoto)?await grabFrame():null;
+  const blob=(state.settings.photo&&!noPhoto)?await grabPhoto():null;
   const pos=await getPos();
   rec=Object.assign(rec||{code:r.code,photos:[]},{gen:'有',kiban:r.kiban,method,time:Date.now(),lat:pos?pos.lat:null,lng:pos?pos.lng:null,acc:pos?Math.round(pos.acc):null,listed:true});
   if(blob){ const name=`${r.code}_${kibanFile(r)}.jpg`; await savePhoto(r.code,name,blob,'main'); rec.photos=[name,...(rec.photos||[]).filter(n=>n!==name)]; flash(); }
@@ -171,14 +188,14 @@ async function recordScan(r,method,{noPhoto=false}={}){
 async function recordUnlisted(code,method){
   const rec={code,gen:'有',kiban:'',method,time:Date.now(),photos:[],listed:false};
   const pos=await getPos(); if(pos){rec.lat=pos.lat;rec.lng=pos.lng;rec.acc=Math.round(pos.acc);}
-  const blob=state.settings.photo?await grabFrame():null;
+  const blob=state.settings.photo?await grabPhoto():null;
   if(blob){ const name=`${code}_機番.jpg`; await savePhoto(code,name,blob,'main'); rec.photos=[name]; flash(); }
   await DB.put('records',rec); state.rec.set(code,rec);
   state.cur={i:-1,code,name:'(リスト外)',place:'',kiban:'',gen0:'',dept:'',loc:'',unlisted:true}; showCur(); showToast(`${code} をリスト外として記録`,'warn'); invalidateList();
 }
 async function addPhotoForCurrent(){
   const r=state.cur; if(!r) return; const rec=state.rec.get(r.code); if(!rec) return;
-  const blob=await grabFrame(); if(!blob){ pop('カメラが動いていません'); return; }
+  const blob=await grabPhoto(); if(!blob){ pop('カメラが動いていません'); return; }
   const name=`${r.code}_${nextSeq(rec)}.jpg`; await savePhoto(r.code,name,blob,'extra'); rec.photos.push(name);
   await DB.put('records',rec); flash(); beep(true); showCur(); invalidateList(); pop(`保存: ${name}`);
 }
@@ -476,8 +493,8 @@ async function distribute(){
 /* ---------------- 設定 ---------------- */
 function loadSettings(){ try{ $('ghToken').value=localStorage.getItem('tn-gh-token')||''; const rp=localStorage.getItem('tn-gh-repo'); $('ghRepo').value=rp||(location.hostname.endsWith('github.io')?location.hostname.split('.')[0]+'/'+(location.pathname.split('/')[1]||''):''); }catch(e){}
   try{ Object.assign(state.settings,JSON.parse(localStorage.getItem('tn-settings')||'{}')); }catch(e){}
-  $('sAutoOcr').checked=state.settings.autoOcr; $('sSound').checked=state.settings.sound; $('sPhoto').checked=state.settings.photo; }
-function saveSettings(){ state.settings={autoOcr:$('sAutoOcr').checked,sound:$('sSound').checked,photo:$('sPhoto').checked}; try{ localStorage.setItem('tn-settings',JSON.stringify(state.settings)); }catch(e){} }
+  $('sAutoOcr').checked=state.settings.autoOcr; $('sSound').checked=state.settings.sound; $('sPhoto').checked=state.settings.photo; $('sPhotoSize').value=state.settings.photoSize||'max'; }
+function saveSettings(){ state.settings={autoOcr:$('sAutoOcr').checked,sound:$('sSound').checked,photo:$('sPhoto').checked,photoSize:$('sPhotoSize').value}; try{ localStorage.setItem('tn-settings',JSON.stringify(state.settings)); }catch(e){} }
 async function renderStore(){
   const m=state.meta; $('listInfo').textContent=m?`${m.filename}(シート「${m.sheet}」${m.rows.length.toLocaleString()}件・${fmtFull(m.at)}に読込)`:'未読み込み';
   let t=''; try{ const e=await navigator.storage.estimate(); t=`端末内の使用量: ${(e.usage/1048576).toFixed(1)}MB`; }catch(e){}
@@ -519,13 +536,13 @@ async function init(){
   $('ghToken').onchange=()=>{ try{localStorage.setItem('tn-gh-token',$('ghToken').value.trim())}catch(e){} }; $('ghRepo').onchange=()=>{ try{localStorage.setItem('tn-gh-repo',$('ghRepo').value.trim())}catch(e){} };
   $('btnPwManual').onclick=()=>{ openPwSheet(); };
   $('btnExcel').onclick=exportExcel; $('btnZip').onclick=exportZip; $('btnCsv').onclick=exportCsv;
-  ['sAutoOcr','sSound','sPhoto'].forEach(id=>$(id).onchange=saveSettings);
+  ['sAutoOcr','sSound','sPhoto','sPhotoSize'].forEach(id=>$(id).onchange=saveSettings);
   $('btnReset').onclick=()=>$('resetConfirm').hidden=false; $('btnResetNo').onclick=()=>$('resetConfirm').hidden=true;
   $('btnResetYes').onclick=async()=>{ await DB.clear('records'); await DB.clear('photos'); state.rec.clear(); state.cur=null; renderRecent(); $('resetConfirm').hidden=true; recentSeen.clear(); renderAll(); pop('回答データを削除しました'); };
   document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopCam(); else if(state.tab==='scan') startCam(); });
   renderAll(); goTab('scan');
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
-  window.__app={state,onText,recordScan,resolveText,ocrCandidates,runOcr,prepOcrCanvas,ocrOnCanvas};
+  window.__app={state,onText,recordScan,resolveText,ocrCandidates,runOcr,prepOcrCanvas,ocrOnCanvas,grabPhoto};
 }
 init();
 
