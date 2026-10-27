@@ -228,7 +228,7 @@ function renderRecent(){
   $('recentCount').textContent=recs.length?`${recs.length}件`:'';
   const cur=state.cur; $('btnShot').disabled=!cur||!state.rec.get(cur.code); $('btnEdit').disabled=!cur;
   $('nolist').hidden=state.rows.length>0; $('recent').hidden=state.rows.length===0;
-  recs.slice(0,30).forEach(rc=>{ const r=state.byCode.get(rc.code)||{code:rc.code,name:'(リスト外)',place:'',dept:'',unlisted:true};
+  const shown=recs.slice(0,30); if(window.innerWidth<900) shown.reverse(); shown.forEach(rc=>{ const r=state.byCode.get(rc.code)||{code:rc.code,name:'(リスト外)',place:'',dept:'',unlisted:true};
     const li=document.createElement('li'); const b=document.createElement('button'); b.type='button'; b.className='rc'+(cur&&cur.code===rc.code?' on':'');
     const c=document.createElement('b'); c.textContent=rc.code; const n=document.createElement('span'); n.className='rn'; n.textContent=r.name;
     const m=document.createElement('span'); m.className='rm'; const g=rc.gen&&rc.gen!=='有'?rc.gen:''; m.textContent=[g,(rc.photos||[]).length+'枚',fmtTime(rc.time).split(' ')[1]].filter(Boolean).join(' ');
@@ -236,8 +236,8 @@ function renderRecent(){
     b.append(c,n,m); b.onclick=()=>{ state.cur=r; renderRecent(); }; li.appendChild(b); ul.appendChild(li); });
   fitRecent();
 }
-function fitRecent(){ const ul=$('recent'); if(!ul||window.innerWidth>=900) return; [...ul.children].forEach(li=>li.hidden=false); const lim=ul.getBoundingClientRect().bottom; [...ul.children].forEach(li=>{ if(li.getBoundingClientRect().bottom>lim+1) li.hidden=true; }); }
-window.addEventListener('resize',()=>fitRecent());
+function fitRecent(){ const ul=$('recent'); if(!ul||window.innerWidth>=900) return; const L=[...ul.children]; L.forEach(li=>li.hidden=false); let used=0; const gap=6, cap=ul.clientHeight; for(let i=L.length-1;i>=0;i--){ const h=L[i].offsetHeight+(used?gap:0); if(used+h>cap+1) L[i].hidden=true; else used+=h; } }
+window.addEventListener('resize',()=>renderRecent());
 function renderProgress(){
   const n=state.rows.length; let done=0; state.rows.forEach(r=>{ const rc=state.rec.get(r.code); if(rc&&rc.time&&rc.listed!==false) done++; });
   $('pDone').textContent=done; $('pAll').textContent=n; $('pBar').style.width=n?(done/n*100)+'%':'0';
