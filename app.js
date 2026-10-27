@@ -403,7 +403,7 @@ async function addFilesToDetail(files){
 function resizeImage(file,max){ return new Promise((res,rej)=>{ const im=new Image(); const u=URL.createObjectURL(file); im.onload=()=>{ const sc=Math.min(1,max/Math.max(im.width,im.height)); const c=document.createElement('canvas'); c.width=Math.round(im.width*sc); c.height=Math.round(im.height*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); URL.revokeObjectURL(u); c.toBlob(b=>res(b),'image/jpeg',.85); }; im.onerror=rej; im.src=u; }); }
 
 /* ---------------- 出力 ---------------- */
-function download(blob,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000); }
+function download(blob,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},60000); }
 const stamp=()=>{const d=new Date();return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`};
 function recordRows(){ return [...state.rec.values()].filter(r=>r.time).sort((a,b)=>a.time-b.time); }
 async function exportExcel(){
@@ -424,14 +424,29 @@ function buildCsv(){ const h=['資産コード','名称','機番','現物','方�
   recordRows().forEach(rc=>{ const r=state.byCode.get(rc.code); lines.push([rc.code,r?r.name:'',rc.kiban||'',rc.gen||'',rc.method||'',fmtFull(rc.time),rc.lat,rc.lng,rc.acc,(rc.photos||[]).join(' ')].map(csvEsc).join(',')); });
   return '﻿'+lines.join('\r\n'); }
 function exportCsv(){ download(new Blob([buildCsv()],{type:'text/csv;charset=utf-8'}),`記録_${stamp()}.csv`); }
+async function listPhotoSizes(){
+  return new Promise((res,rej)=>{ const out=[]; const rq=DB._s('photos','readonly').openCursor();
+    rq.onsuccess=()=>{ const c=rq.result; if(!c) return res(out); out.push({name:c.value.name,size:c.value.blob.size}); c.continue(); }; rq.onerror=()=>rej(rq.error); });
+}
 async function exportZip(){
-  const photos=await DB.all('photos'); if(!photos.length) return pop('写真がありません');
-  const per=150, parts=Math.ceil(photos.length/per), st=stamp(); $('btnZip').disabled=true;
-  try{ for(let p=0;p<parts;p++){ const z=new JSZip(); if(p===0) z.file(`記録_${st}.csv`,buildCsv());
-      photos.slice(p*per,(p+1)*per).forEach(ph=>z.file(ph.name,ph.blob));
-      $('expInfo').textContent=`ZIP作成中 ${p+1}/${parts}`; const blob=await z.generateAsync({type:'blob',compression:'STORE'});
-      download(blob,`棚卸写真_${st}${parts>1?`_${p+1}of${parts}`:''}.zip`); await new Promise(r=>setTimeout(r,700)); }
-    $('expInfo').textContent=`写真${photos.length}枚をZIP ${parts}個で出力しました。`; }
+  const items=await listPhotoSizes(); if(!items.length) return pop('写真がありません');
+  /* 端末のメモリ節約のため、約40MBごとにZIPを分けて、1つずつ作って保存する */
+  const BUDGET=40*1024*1024, MAXN=150, parts=[]; let cur=[],sz=0;
+  for(const it of items){ if(cur.length&&(sz+it.size>BUDGET||cur.length>=MAXN)){ parts.push(cur); cur=[]; sz=0; } cur.push(it.name); sz+=it.size; }
+  if(cur.length) parts.push(cur);
+  const st=stamp(); $('btnZip').disabled=true;
+  try{
+    for(let p=0;p<parts.length;p++){
+      $('expInfo').textContent=`ZIPを作成中 ${p+1}/${parts.length}(1つ作るごとに保存されます。画面を閉じないでください)`;
+      await new Promise(r=>setTimeout(r,50));
+      const z=new JSZip(); if(p===0) z.file(`記録_${st}.csv`,buildCsv());
+      for(const name of parts[p]){ const ph=await DB.get('photos',name); if(ph) z.file(name,ph.blob,{binary:true}); }
+      const blob=await z.generateAsync({type:'blob',compression:'STORE',streamFiles:true});
+      download(blob,`棚卸写真_${st}${parts.length>1?`_${p+1}of${parts.length}`:''}.zip`);
+      await new Promise(r=>setTimeout(r,1500));
+    }
+    $('expInfo').textContent=`写真${items.length}枚を、ZIP ${parts.length}個で出力しました。`+(parts.length>1?'すべて解凍して、同じフォルダにまとめてください。':'');
+  }catch(e){ $('expInfo').textContent='ZIPを作れませんでした。写真が多い場合は、写真のサイズを「標準」にするか、作業を区切って出力してください。'; }
   finally{ $('btnZip').disabled=false; }
 }
 
