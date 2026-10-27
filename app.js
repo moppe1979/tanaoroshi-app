@@ -423,7 +423,7 @@ function csvEsc(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replac
 function buildCsv(){ const h=['資産コード','名称','機番','現物','方法','記録日時','緯度','経度','精度(m)','写真名']; const lines=[h.join(',')];
   recordRows().forEach(rc=>{ const r=state.byCode.get(rc.code); lines.push([rc.code,r?r.name:'',rc.kiban||'',rc.gen||'',rc.method||'',fmtFull(rc.time),rc.lat,rc.lng,rc.acc,(rc.photos||[]).join(' ')].map(csvEsc).join(',')); });
   return '﻿'+lines.join('\r\n'); }
-function exportCsv(){ download(new Blob([buildCsv()],{type:'text/csv;charset=utf-8'}),`棚卸記録_${stamp()}.csv`); }
+function exportCsv(){ download(new Blob([buildCsv()],{type:'text/csv;charset=utf-8'}),`記録_${stamp()}.csv`); }
 async function exportZip(){
   const photos=await DB.all('photos'); if(!photos.length) return pop('写真がありません');
   const per=150, parts=Math.ceil(photos.length/per); $('btnZip').disabled=true;
