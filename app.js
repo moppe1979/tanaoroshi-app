@@ -426,11 +426,11 @@ function buildCsv(){ const h=['資産コード','名称','機番','現物','方�
 function exportCsv(){ download(new Blob([buildCsv()],{type:'text/csv;charset=utf-8'}),`記録_${stamp()}.csv`); }
 async function exportZip(){
   const photos=await DB.all('photos'); if(!photos.length) return pop('写真がありません');
-  const per=150, parts=Math.ceil(photos.length/per); $('btnZip').disabled=true;
-  try{ for(let p=0;p<parts;p++){ const z=new JSZip(); if(p===0) z.file('記録.csv',buildCsv());
+  const per=150, parts=Math.ceil(photos.length/per), st=stamp(); $('btnZip').disabled=true;
+  try{ for(let p=0;p<parts;p++){ const z=new JSZip(); if(p===0) z.file(`記録_${st}.csv`,buildCsv());
       photos.slice(p*per,(p+1)*per).forEach(ph=>z.file(ph.name,ph.blob));
       $('expInfo').textContent=`ZIP作成中 ${p+1}/${parts}`; const blob=await z.generateAsync({type:'blob',compression:'STORE'});
-      download(blob,`棚卸写真_${stamp()}${parts>1?`_${p+1}of${parts}`:''}.zip`); await new Promise(r=>setTimeout(r,700)); }
+      download(blob,`棚卸写真_${st}${parts>1?`_${p+1}of${parts}`:''}.zip`); await new Promise(r=>setTimeout(r,700)); }
     $('expInfo').textContent=`写真${photos.length}枚をZIP ${parts}個で出力しました。`; }
   finally{ $('btnZip').disabled=false; }
 }
