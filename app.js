@@ -147,7 +147,7 @@ function resolveText(text){
 }
 const recentSeen=new Map();
 async function onText(text,method){
-  if(String(text).startsWith('TNPW1:')){ const pw=String(text).slice(6).trim(); const now=Date.now(); if(recentSeen.get('pw'+pw)>now-8000) return; recentSeen.set('pw'+pw,now); return receiveList(pw); }
+  if(String(text).startsWith('TNPW1:')){ const parts=String(text).slice(6).trim().split(':'); const pw=parts[0], at=parts[1]||''; const now=Date.now(); if(recentSeen.get('pw'+pw)>now-8000) return; recentSeen.set('pw'+pw,now); return receiveList(pw,at); }
   const {rows,raw}=resolveText(text);
   if(rows.length){ const r=rows[0]; const now=Date.now(); if(recentSeen.get(r.code)>now-4000) return; recentSeen.set(r.code,now); return recordScan(r,method); }
   if(raw.length){ const c=raw[0], now=Date.now(); if(recentSeen.get(c)>now-6000) return; recentSeen.set(c,now); beep(false); showToast(`リストにありません: ${c}`,'bad',{label:'リスト外として登録',fn:()=>recordUnlisted(c,method)}); }
@@ -408,12 +408,13 @@ async function decryptList(text,pw){
   if(o.z){ raw=await gz(raw,'d'); if(!raw) throw new Error('この端末は圧縮データを展開できません'); }
   return JSON.parse(new TextDecoder().decode(raw));
 }
-async function receiveList(pw){
+async function receiveList(pw,at){
   if(receiveList.busy) return; receiveList.busy=true;
   try{
     showToast('リストを受け取り中…','ok');
     const res=await fetch('list.enc?ts='+Date.now(),{cache:'no-store'}); if(!res.ok) throw new Error('list.enc が見つかりません');
-    let p; try{ p=await decryptList(await res.text(),pw); }catch(e){ if(e.message&&e.message.includes('圧縮')) throw e; throw new Error('パスワードが合いません。新しいQRを読み取ってください'); }
+    const txt=await res.text(); if(at){ try{ const o=JSON.parse(txt); if(String(o.at)!==String(at)) throw new Error(`QRとリストの版が違います。QRは ${fmtTime(+at)} 発行、公開中のリストは ${fmtTime(o.at)} 発行です。管理者が最新のリストを公開してください`); }catch(e){ if(e.message.startsWith('QRと')) throw e; } }
+    let p; try{ p=await decryptList(txt,pw); }catch(e){ if(e.message&&e.message.includes('圧縮')) throw e; throw new Error('パスワードが合いません。新しいQRを読み取ってください'); }
     await DB.put('meta',{header:p.header,rows:p.rows,filename:p.filename,sheet:p.sheet,at:p.at,received:true},'list');
     await loadList(); renderAll(); beep(true); showToast(`リストを受け取りました(${state.rows.length.toLocaleString()}件)`,'ok');
   }catch(e){ beep(false); showToast(e.message||'受け取れませんでした','bad'); }
@@ -425,7 +426,7 @@ async function distribute(){
   const meta=state.meta; if(!meta){ $('distStatus').textContent='先にリストを読み込んでください。'; return; }
   $('distStatus').textContent='暗号化しています…';
   const pw=genPassword(); lastEnc=await encryptList(meta,pw);
-  $('distOut').hidden=false; $('pwQr').src=qrDataUrl('TNPW1:'+pw); $('pwText').textContent=pw; $('pwInfo').textContent=fmtFull(Date.now())+' 発行';
+  $('distOut').hidden=false; $('pwQr').src=qrDataUrl('TNPW1:'+pw+':'+JSON.parse(lastEnc).at); $('pwText').textContent=pw; $('pwInfo').textContent=fmtFull(Date.now())+' 発行';
   const tok=$('ghToken').value.trim(), repo=$('ghRepo').value.trim();
   if(!tok){ $('distStatus').textContent='パスワードを作りました。list.encを保存して、GitHubのリポジトリに上書きアップロードしてください(自動公開を使うには、下の設定にトークンを入れます)。'; return; }
   try{
