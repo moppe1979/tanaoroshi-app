@@ -148,7 +148,7 @@ async function grabPhoto(){
       if(blob&&blob.size>0) return blob;
     }catch(e){}
   }
-  return grabFrame(100000,0.92);
+  return grabFrame(3200,0.85);
 }
 function flash(){ const f=$('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
 
@@ -431,7 +431,7 @@ async function listPhotoSizes(){
 async function exportZip(){
   const items=await listPhotoSizes(); if(!items.length) return pop('写真がありません');
   /* 端末のメモリ節約のため、約40MBごとにZIPを分けて、1つずつ作って保存する */
-  const BUDGET=40*1024*1024, MAXN=150, parts=[]; let cur=[],sz=0;
+  const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); const BUDGET=(IOS?10:40)*1024*1024, MAXN=IOS?40:150, parts=[]; let cur=[],sz=0;
   for(const it of items){ if(cur.length&&(sz+it.size>BUDGET||cur.length>=MAXN)){ parts.push(cur); cur=[]; sz=0; } cur.push(it.name); sz+=it.size; }
   if(cur.length) parts.push(cur);
   const st=stamp(); $('btnZip').disabled=true;
@@ -443,7 +443,7 @@ async function exportZip(){
       for(const name of parts[p]){ const ph=await DB.get('photos',name); if(ph) z.file(name,ph.blob,{binary:true}); }
       const blob=await z.generateAsync({type:'blob',compression:'STORE',streamFiles:true});
       download(blob,`棚卸写真_${st}${parts.length>1?`_${p+1}of${parts.length}`:''}.zip`);
-      await new Promise(r=>setTimeout(r,1500));
+      await new Promise(r=>setTimeout(r,IOS?3000:1500));
     }
     $('expInfo').textContent=`写真${items.length}枚を、ZIP ${parts.length}個で出力しました。`+(parts.length>1?'すべて解凍して、同じフォルダにまとめてください。':'');
   }catch(e){ $('expInfo').textContent='ZIPを作れませんでした。写真が多い場合は、写真のサイズを「標準」にするか、作業を区切って出力してください。'; }
