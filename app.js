@@ -127,7 +127,7 @@ async function detectOnce(){
   }catch(e){}
   scheduleDetect();
 }
-const sheetOpen=()=>!$('sheet').hidden||!$('ocrSheet').hidden||!$('detail').hidden;
+const sheetOpen=()=>!$('sheet').hidden||!$('ocrSheet').hidden||!$('detail').hidden||!$('linkSheet').hidden;
 function grabFrame(maxSide=1920,q=0.85){
   return new Promise(res=>{ if(!camOn||video.readyState<2) return res(null);
     const vw=video.videoWidth, vh=video.videoHeight, sc=Math.min(1,maxSide/Math.max(vw,vh)); const c=document.createElement('canvas'); c.width=Math.round(vw*sc); c.height=Math.round(vh*sc);
@@ -372,6 +372,13 @@ function renderList(more=false){
   $('btnMore').hidden=upto>=filtered.length; listDirty=false;
 }
 
+/* ---------------- 未回答の行: マップ/写真 ---------------- */
+const MAP_URL=c=>'https://fix-assets-lb.kitora.toyota.co.jp/FaiApp/InventoryMap?machineCodeJson='+encodeURIComponent(JSON.stringify([{machineCode:c}]))+'&fromModeChangeValue=0&fromShowModeChangeValue=1&from=InventoryList';
+const PHOTO_URL=c=>'https://fix-assets-lb.kitora.toyota.co.jp/FaiApp/InventoryPhoto/Index/'+encodeURIComponent(c);
+function openLinkSheet(r){
+  $('lkCode').textContent=r.code; $('lkName').textContent=r.name; $('lkMap').href=MAP_URL(r.code); $('lkPhoto').href=PHOTO_URL(r.code);
+  $('lkDetail').onclick=()=>{ $('linkSheet').hidden=true; openDetail(r.code); }; $('linkSheet').hidden=false;
+}
 /* ---------------- 詳細 ---------------- */
 let detailRow=null;
 async function openDetail(code){
@@ -544,7 +551,8 @@ async function init(){
   $('dClose').onclick=()=>{ $('detail').hidden=true; renderRecent(); }; $('dFile').onchange=async e=>{ await addFilesToDetail([...e.target.files]); e.target.value=''; };
   ['fq','fgen','fdept','floc'].forEach(id=>$(id).addEventListener(id==='fq'?'input':'change',()=>renderList()));
   $('btnMore').onclick=()=>{ state.limit+=300; renderList(true); };
-  $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(tr) openDetail(tr.dataset.code); };
+  $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(!tr) return; const r=state.byCode.get(tr.dataset.code); if(r&&!genOf(r)) openLinkSheet(r); else openDetail(tr.dataset.code); };
+  $('lkClose').onclick=()=>$('linkSheet').hidden=true;
   document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{ const k=th.dataset.sort; state.sort=state.sort.k===k?{k,d:-state.sort.d}:{k,d:1}; renderList(); });
   $('fileList').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $('listInfo').textContent='読み込み中…'; try{ await importList(f); pop('リストを読み込みました'); }catch(err){ $('listInfo').textContent='読み込めませんでした: '+err.message; } e.target.value=''; };
   $('btnReissue').onclick=distribute; $('btnEncSave').onclick=()=>{ if(!lastEnc) return pop('先にパスワードを発行してください'); download(new Blob([lastEnc],{type:'application/json'}),'list.enc'); };

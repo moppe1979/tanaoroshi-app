@@ -148,3 +148,5 @@ li.flag .rm{color:var(--warn);font-weight:700}
 
 .recent{justify-content:flex-end}
 @media (min-width:900px){.recent{justify-content:flex-start}}
+
+.linkbtn{text-decoration:none;min-height:52px;font-size:16px}
