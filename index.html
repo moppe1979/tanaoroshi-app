@@ -8,6 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -49,6 +50,8 @@
 
 <!-- ============ 一覧 ============ -->
 <section id="v-list" class="view" hidden>
+<div class="listsplit">
+<div class="listcol">
   <div class="filters">
     <input type="search" id="fq" placeholder="資産コード・名称・機番・置場で検索" aria-label="検索">
     <select id="fgen" aria-label="現物">
@@ -72,6 +75,13 @@
     </table>
   </div>
   <button id="btnMore" class="btn ghost more" hidden>さらに表示</button>
+</div>
+<aside class="mapcol" aria-label="位置情報の地図">
+  <div class="maphead"><b>位置情報の地図</b><span id="mapInfo" class="cur-info"></span></div>
+  <div id="map"></div>
+  <div class="maplegend"><i style="background:#1b7a43"></i>有 <i style="background:#a85a00"></i>確認中 <i style="background:#b3261e"></i>無 <i style="background:#5f6b65"></i>その他</div>
+</aside>
+</div>
 </section>
 
 <!-- ============ 設定・出力 ============ -->
@@ -178,6 +188,7 @@
 
 <div id="pop" class="pop" hidden></div>
 
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/zxing.min.js"></script>
 <script src="vendor/exceljs.min.js"></script>
 <script src="vendor/jszip.min.js"></script>

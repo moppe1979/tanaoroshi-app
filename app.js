@@ -369,7 +369,52 @@ function renderList(more=false){
     frag.appendChild(tr); }
   tb.replaceChildren(frag);
   $('listCount').textContent=`${filtered.length.toLocaleString()}件 / 全${state.rows.length.toLocaleString()}件`+(upto<filtered.length?`(先頭${upto}件を表示)`:'');
-  $('btnMore').hidden=upto>=filtered.length; listDirty=false;
+  $('btnMore').hidden=upto>=filtered.length; listDirty=false; if(!more) updateMap(); else highlight(selCode);
+}
+
+
+/* ---------------- 地図(PCの一覧の右側) ---------------- */
+const MAPCOL={'有':'#1b7a43','確認中':'#a85a00','無':'#b3261e'};
+let map=null, markerLayer=null, markers=new Map(), selCode=null, fitNext=true;
+const isWide=()=>window.innerWidth>=900;
+function initMap(){
+  if(map||typeof L==='undefined'||!isWide()) return;
+  map=L.map('map',{zoomControl:true,preferCanvas:true}).setView([35.08,137.15],15);
+  const std=L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',{maxZoom:18,attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>'});
+  const photo=L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',{maxZoom:18,attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>'});
+  const osm=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'});
+  std.addTo(map); L.control.layers({'地理院 標準':std,'地理院 航空写真':photo,'OpenStreetMap':osm},null,{collapsed:true}).addTo(map);
+  markerLayer=L.layerGroup().addTo(map);
+}
+function updateMap(){
+  if(!isWide()) return; initMap(); if(!map) return;
+  markerLayer.clearLayers(); markers.clear(); const pts=[]; let noLoc=0;
+  filtered.forEach(r=>{ const rc=state.rec.get(r.code); if(!(rc&&rc.lat!=null)){ return; }
+    const gv=genOf(r), col=MAPCOL[gv]||'#5f6b65';
+    const m=L.circleMarker([rc.lat,rc.lng],{radius:8,color:'#fff',weight:2,fillColor:col,fillOpacity:.95});
+    m.on('click',()=>selectRow(r.code,{fly:false,scroll:true})); m.bindPopup(()=>popupFor(r,rc),{minWidth:200}); m.addTo(markerLayer); markers.set(r.code,m); pts.push([rc.lat,rc.lng]); });
+  noLoc=filtered.length-pts.length;
+  $('mapInfo').textContent=pts.length?`${pts.length}件を表示 / 位置なし ${noLoc.toLocaleString()}件`:'位置情報のある資産がありません(スマホで読み取ると表示されます)';
+  setTimeout(()=>{ map.invalidateSize(); if(fitNext&&pts.length){ map.fitBounds(pts,{padding:[30,30],maxZoom:18}); fitNext=false; } },0);
+  if(selCode&&markers.has(selCode)) highlight(selCode);
+}
+function popupFor(r,rc){
+  const d=document.createElement('div'); d.className='mpop';
+  const t=document.createElement('b'); t.textContent=r.code; const n=document.createElement('div'); n.textContent=r.name;
+  const i=document.createElement('div'); i.className='cur-info'; i.textContent=[genOf(r)||'未回答',fmtFull(rc.time)].join(' / ');
+  const row=document.createElement('div'); row.className='mrow';
+  const b=document.createElement('button'); b.className='btn'; b.textContent='詳細・回答'; b.onclick=()=>openDetail(r.code); row.appendChild(b);
+  if(!genOf(r)){ const m=document.createElement('a'); m.className='btn'; m.textContent='マップ'; m.href=MAP_URL(r.code); m.target='_blank'; m.rel='noopener noreferrer'; const p=document.createElement('a'); p.className='btn'; p.textContent='写真'; p.href=PHOTO_URL(r.code); p.target='_blank'; p.rel='noopener noreferrer'; row.append(m,p); }
+  d.append(t,n,i,row);
+  const name=(rc.photos||[])[0]; if(name){ DB.get('photos',name).then(ph=>{ if(!ph) return; const im=document.createElement('img'); im.className='mimg'; im.src=URL.createObjectURL(ph.blob); im.onload=()=>URL.revokeObjectURL(im.src); d.insertBefore(im,row); }); }
+  return d;
+}
+function highlight(code){ document.querySelectorAll('#tbody tr.sel').forEach(x=>x.classList.remove('sel')); const tr=document.querySelector(`#tbody tr[data-code="${code}"]`); if(tr) tr.classList.add('sel'); }
+function selectRow(code,{fly=true,scroll=false}={}){
+  selCode=code; highlight(code);
+  if(scroll){ const tr=document.querySelector(`#tbody tr[data-code="${code}"]`); if(tr) tr.scrollIntoView({block:'center',behavior:'smooth'}); }
+  const m=markers.get(code); if(m&&fly&&map){ map.flyTo(m.getLatLng(),Math.max(map.getZoom(),17),{duration:.5}); m.openPopup(); }
+  else if(!m&&fly) pop('この資産には位置情報がありません');
 }
 
 /* ---------------- 未回答の行: マップ/写真 ---------------- */
@@ -529,7 +574,7 @@ function goTab(t){
   state.tab=t; document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
   ['scan','list','settings'].forEach(v=>$('v-'+v).hidden=v!==t);
   if(t==='scan') { startCam(); } else stopCam();
-  if(t==='list'&&listDirty) renderList(); if(t==='settings') renderStore();
+  if(t==='list'){ if(listDirty) renderList(); else if(map) setTimeout(()=>map.invalidateSize(),50); else updateMap(); } if(t==='settings') renderStore();
   window.scrollTo(0,0);
 }
 
@@ -549,9 +594,9 @@ async function init(){
   $('dUndo').onclick=async()=>{ if(detailRow){ await undoCurrent(detailRow); $('detail').hidden=true; } };
   $('dGen').onclick=e=>{ const v=e.target.dataset&&e.target.dataset.v; if(v!=null) setGen(detailRow,v).then(renderDetail); };
   $('dClose').onclick=()=>{ $('detail').hidden=true; renderRecent(); }; $('dFile').onchange=async e=>{ await addFilesToDetail([...e.target.files]); e.target.value=''; };
-  ['fq','fgen','fdept','floc'].forEach(id=>$(id).addEventListener(id==='fq'?'input':'change',()=>renderList()));
+  ['fq','fgen','fdept','floc'].forEach(id=>$(id).addEventListener(id==='fq'?'input':'change',()=>{ fitNext=true; renderList(); }));
   $('btnMore').onclick=()=>{ state.limit+=300; renderList(true); };
-  $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(!tr) return; const r=state.byCode.get(tr.dataset.code); if(r&&!genOf(r)) openLinkSheet(r); else openDetail(tr.dataset.code); };
+  $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(!tr) return; const r=state.byCode.get(tr.dataset.code); if(isWide()&&map){ selectRow(tr.dataset.code); return; } if(r&&!genOf(r)) openLinkSheet(r); else openDetail(tr.dataset.code); };
   $('lkClose').onclick=()=>$('linkSheet').hidden=true;
   document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{ const k=th.dataset.sort; state.sort=state.sort.k===k?{k,d:-state.sort.d}:{k,d:1}; renderList(); });
   $('fileList').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $('listInfo').textContent='読み込み中…'; try{ await importList(f); pop('リストを読み込みました'); }catch(err){ $('listInfo').textContent='読み込めませんでした: '+err.message; } e.target.value=''; };
