@@ -237,7 +237,7 @@ function renderRecent(){
   fitRecent();
 }
 function fitRecent(){ const ul=$('recent'); if(!ul||window.innerWidth>=900) return; const L=[...ul.children]; L.forEach(li=>li.hidden=false); let used=0; const gap=6, cap=ul.clientHeight; for(let i=L.length-1;i>=0;i--){ const h=L[i].offsetHeight+(used?gap:0); if(used+h>cap+1) L[i].hidden=true; else used+=h; } }
-window.addEventListener('resize',()=>renderRecent());
+window.addEventListener('resize',()=>{ renderRecent(); syncBarH(); });
 function renderProgress(){
   const n=state.rows.length; let done=0; state.rows.forEach(r=>{ const rc=state.rec.get(r.code); if(rc&&rc.time&&rc.listed!==false) done++; });
   $('pDone').textContent=done; $('pAll').textContent=n; $('pBar').style.width=n?(done/n*100)+'%':'0';
@@ -356,6 +356,7 @@ function applyFilter(){
   const {k,d:dir}=state.sort; const key=r=>{ const rc=state.rec.get(r.code); return k==='gen'?genOf(r):k==='time'?(rc&&rc.time||0):r[k]; };
   filtered.sort((a,b)=>{ const x=key(a),y=key(b); return (x>y?1:x<y?-1:0)*dir; });
 }
+function syncBarH(){ const b=$('listbar'); if(b&&b.offsetHeight) document.documentElement.style.setProperty('--barh',b.offsetHeight+'px'); }
 function renderList(more=false){
   if(!more){ applyFilter(); state.limit=200; }
   const tb=$('tbody'); const frag=document.createDocumentFragment(); const upto=Math.min(state.limit,filtered.length);
@@ -369,7 +370,7 @@ function renderList(more=false){
     frag.appendChild(tr); }
   tb.replaceChildren(frag);
   $('listCount').textContent=`${filtered.length.toLocaleString()}件 / 全${state.rows.length.toLocaleString()}件`+(upto<filtered.length?`(先頭${upto}件を表示)`:'');
-  $('btnMore').hidden=upto>=filtered.length; listDirty=false; if(!more) updateMap(); else highlight(selCode);
+  $('btnMore').hidden=upto>=filtered.length; listDirty=false; syncBarH(); if(!more) updateMap(); else highlight(selCode);
 }
 
 
