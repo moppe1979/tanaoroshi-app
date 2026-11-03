@@ -477,6 +477,25 @@ function buildCsv(){ const h=['資産コード','名称','機番','現物','方�
   recordRows().forEach(rc=>{ const r=state.byCode.get(rc.code); lines.push([rc.code,r?r.name:'',rc.kiban||'',rc.gen||'',rc.method||'',fmtFull(rc.time),rc.lat,rc.lng,rc.acc,(rc.photos||[]).join(' ')].map(csvEsc).join(',')); });
   return '﻿'+lines.join('\r\n'); }
 function exportCsv(){ download(new Blob([buildCsv()],{type:'text/csv;charset=utf-8'}),`記録_${stamp()}.csv`); }
+function parseCsv(t){ const rows=[]; let r=[],c='',q=false; t=t.replace(/^\uFEFF/,'');
+  for(let i=0;i<t.length;i++){ const ch=t[i];
+    if(q){ if(ch==='"'){ if(t[i+1]==='"'){c+='"';i++;} else q=false; } else c+=ch; }
+    else if(ch==='"') q=true; else if(ch===','){ r.push(c); c=''; } else if(ch==='\n'){ r.push(c); rows.push(r); r=[]; c=''; } else if(ch!=='\r') c+=ch; }
+  if(c||r.length){ r.push(c); rows.push(r); } return rows; }
+async function importRecCsv(f){
+  const rows=parseCsv(await f.text()); const h=rows.shift()||[]; const ix=n=>h.indexOf(n);
+  const iC=ix('資産コード'),iG=ix('現物'),iM=ix('方法'),iT=ix('記録日時'),iLa=ix('緯度'),iLo=ix('経度'),iA=ix('精度(m)'),iP=ix('写真名'),iK=ix('機番');
+  if(iC<0) throw new Error('資産コード列がありません');
+  let n=0;
+  for(const r of rows){ const code=(r[iC]||'').trim(); if(!code) continue;
+    const old=state.rec.get(code); const tm=iT>=0?Date.parse((r[iT]||'').replace(/\//g,'-').replace(' ','T')):NaN;
+    const lat=parseFloat(r[iLa]), lng=parseFloat(r[iLo]);
+    const rec=Object.assign({code,photos:[],listed:state.rows.some(x=>x.code===code)},old||{},{gen:(r[iG]||'').trim()||(old&&old.gen)||'有',method:(r[iM]||'').trim()||'CSV',time:isNaN(tm)?(old&&old.time)||Date.now():tm});
+    if(!isNaN(lat)&&!isNaN(lng)){ rec.lat=lat; rec.lng=lng; const ac=parseFloat(r[iA]); if(!isNaN(ac)) rec.acc=ac; }
+    if(iP>=0&&r[iP]){ rec.photos=[...new Set([...(rec.photos||[]),...(r[iP].match(/[^\s;|][^;|]*?\.jpe?g/gi)||[]).map(s=>s.trim())])]; }
+    await DB.put('records',rec); state.rec.set(code,rec); n++; }
+  renderProgress(); invalidateList(); return n;
+}
 async function listPhotoSizes(){
   return new Promise((res,rej)=>{ const out=[]; const rq=DB._s('photos','readonly').openCursor();
     rq.onsuccess=()=>{ const c=rq.result; if(!c) return res(out); out.push({name:c.value.name,size:c.value.blob.size}); c.continue(); }; rq.onerror=()=>rej(rq.error); });
@@ -600,6 +619,7 @@ async function init(){
   $('tbody').onclick=e=>{ const tr=e.target.closest('tr'); if(!tr) return; const r=state.byCode.get(tr.dataset.code); if(isWide()&&map){ selectRow(tr.dataset.code); return; } if(r&&!genOf(r)) openLinkSheet(r); else openDetail(tr.dataset.code); };
   $('lkClose').onclick=()=>$('linkSheet').hidden=true;
   document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{ const k=th.dataset.sort; state.sort=state.sort.k===k?{k,d:-state.sort.d}:{k,d:1}; renderList(); });
+  $('fileRec').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ const n=await importRecCsv(f); pop(`記録${n}件を読み込みました`); }catch(err){ pop('読み込めませんでした: '+err.message); } e.target.value=''; };
   $('fileList').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $('listInfo').textContent='読み込み中…'; try{ await importList(f); pop('リストを読み込みました'); }catch(err){ $('listInfo').textContent='読み込めませんでした: '+err.message; } e.target.value=''; };
   $('btnReissue').onclick=distribute; $('btnEncSave').onclick=()=>{ if(!lastEnc) return pop('先にパスワードを発行してください'); download(new Blob([lastEnc],{type:'application/json'}),'list.enc'); };
   $('ghToken').onchange=()=>{ try{localStorage.setItem('tn-gh-token',$('ghToken').value.trim())}catch(e){} }; $('ghRepo').onchange=()=>{ try{localStorage.setItem('tn-gh-repo',$('ghRepo').value.trim())}catch(e){} };
