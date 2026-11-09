@@ -14,12 +14,75 @@ const DB = {
   _s(store,mode){ return this.db.transaction(store,mode).objectStore(store); },
   _p(req){ return new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error)}); },
   get(s,k){ return this._p(this._s(s,'readonly').get(k)); },
-  put(s,v,k){ return this._p(this._s(s,'readwrite').put(v,k)); },
-  del(s,k){ return this._p(this._s(s,'readwrite').delete(k)); },
+  put(s,v,k){ return this._p(this._s(s,'readwrite').put(v,k)).then(r=>{ if(window.SYNC) SYNC.onPut(s,v); return r; }); },
+  del(s,k){ return this._p(this._s(s,'readwrite').delete(k)).then(r=>{ if(window.SYNC) SYNC.onDel(s,k); return r; }); },
   all(s){ return this._p(this._s(s,'readonly').getAll()); },
   byCode(code){ return this._p(this._s('photos','readonly').index('code').getAll(code)); },
   clear(s){ return this._p(this._s(s,'readwrite').clear()); }
 };
+
+
+/* ---------------- サーバー同期(PostgreSQL) ---------------- */
+const SYNC = {
+  cfg(){ try{ return JSON.parse(localStorage.getItem('tn-server')||'{}'); }catch(e){ return {}; } },
+  saveCfg(c){ try{ localStorage.setItem('tn-server',JSON.stringify(c)); }catch(e){} },
+  on(){ const c=this.cfg(); return !!(c.url&&c.key); },
+  q(){ try{ const q=JSON.parse(localStorage.getItem('tn-queue')||'{}'); return {r:q.r||[],p:q.p||[],d:q.d||[],dp:q.dp||[]}; }catch(e){ return {r:[],p:[],d:[],dp:[]}; } },
+  saveQ(q){ try{ localStorage.setItem('tn-queue',JSON.stringify(q)); }catch(e){} },
+  add(k,v){ const q=this.q(); if(!q[k].includes(v)) q[k].push(v); this.saveQ(q); },
+  onPut(s,v){ if(!this.on()) return; if(s==='records'){ this.add('r',v.code); const q=this.q(); q.d=q.d.filter(x=>x!==v.code); this.saveQ(q); } else if(s==='photos') this.add('p',v.name); else return; this.kick(); },
+  onDel(s,k){ if(!this.on()) return; if(s==='records'){ const q=this.q(); q.r=q.r.filter(x=>x!==k); if(!q.d.includes(k)) q.d.push(k); this.saveQ(q); } else if(s==='photos'){ const q=this.q(); q.p=q.p.filter(x=>x!==k); if(!q.dp.includes(k)) q.dp.push(k); this.saveQ(q); } else return; this.kick(); },
+  kick(){ clearTimeout(this.t); this.t=setTimeout(()=>this.flush(),1500); },
+  async api(p,opt={}){
+    const c=this.cfg(); const base=c.url.replace(/\/+$/,'');
+    const r=await fetch(base+p,{...opt,headers:{'X-API-Key':c.key,...(opt.headers||{})}});
+    if(!r.ok) throw new Error(r.status===401?'合言葉が違います':`サーバーエラー(${r.status})`);
+    return r;
+  },
+  info(t){ const e=$('srvInfo'); if(e) e.textContent=t; },
+  async flush(){
+    if(!this.on()||this.busy||!navigator.onLine) return; this.busy=true; let err=null;
+    try{
+      let q=this.q();
+      for(const code of [...q.r]){ const rec=state.rec.get(code)||await DB.get('records',code); if(rec){ const b={code:rec.code,gen:rec.gen,kiban:rec.kiban,method:rec.method,time:rec.time,lat:rec.lat,lng:rec.lng,acc:rec.acc,listed:rec.listed!==false,photos:rec.photos||[]};
+          await this.api('/api/records/'+encodeURIComponent(code),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); }
+        q=this.q(); q.r=q.r.filter(x=>x!==code); this.saveQ(q); }
+      for(const name of [...q.p]){ const p=await DB.get('photos',name); if(p){
+          await this.api(`/api/photos/${encodeURIComponent(name)}?code=${encodeURIComponent(p.code)}&kind=${p.kind||''}&time=${p.time||''}`,{method:'PUT',headers:{'Content-Type':'image/jpeg'},body:p.blob}); }
+        q=this.q(); q.p=q.p.filter(x=>x!==name); this.saveQ(q); }
+      for(const code of [...q.d]){ await this.api('/api/records/'+encodeURIComponent(code),{method:'DELETE'}); q=this.q(); q.d=q.d.filter(x=>x!==code); this.saveQ(q); }
+      for(const name of [...q.dp]){ await this.api('/api/photos/'+encodeURIComponent(name),{method:'DELETE'}); q=this.q(); q.dp=q.dp.filter(x=>x!==name); this.saveQ(q); }
+    }catch(e){ err=e; }
+    this.busy=false; this.status(err);
+    return !err;
+  },
+  status(err){ const q=this.q(), n=q.r.length+q.p.length+q.d.length+q.dp.length;
+    if(err) this.info(`同期できていません(${err.message})。未送信 ${n}件は端末に保存されています。`);
+    else this.info(n?`未送信 ${n}件`:`サーバーと同期済み(${new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})})`); },
+  async pull(){ /* サーバーの記録を取り込む(他の端末で読み取った分)。端末側が新しければ端末を優先 */
+    const rows=await (await this.api('/api/records')).json(); let n=0;
+    for(const s of rows){ const old=state.rec.get(s.code); if(old&&(old.time||0)>=(s.time||0)) continue;
+      const rec=Object.assign({photos:[]},old||{},{code:s.code,gen:s.gen,kiban:s.kiban||'',method:s.method,time:s.time,lat:s.lat,lng:s.lng,acc:s.acc,listed:s.listed,photos:[...new Set([...(old&&old.photos||[]),...(s.photos||[])])]});
+      await DB.put('records',rec); state.rec.set(rec.code,rec); n++; }
+    const q=this.q(); q.r=q.r.filter(c=>!rows.some(s=>s.code===c&&(state.rec.get(c)||{}).time===s.time)); this.saveQ(q); /* 取り込み分は再送しない */
+    return n; },
+  async syncNow(){ if(!this.on()) return pop('サーバーのアドレスと合言葉を入力してください');
+    this.info('同期中…'); const ok=await this.flush(); if(!ok) return;
+    try{ const n=await this.pull(); renderProgress(); invalidateList(); this.info(`同期しました(サーバーから${n}件を取り込み)`); pop('同期しました'); }catch(e){ this.status(e); } },
+  async test(){ if(!this.on()) return pop('サーバーのアドレスと合言葉を入力してください');
+    this.info('接続中…'); try{ const j=await (await this.api('/api/health')).json(); this.info(`接続OK: サーバー上の記録 ${j.records}件 / 写真 ${j.photos}枚`); }catch(e){ this.info('接続できません: '+(e.message==='Failed to fetch'?'アドレス・HTTPS証明書・ネットワークを確認してください':e.message)); } },
+  async sendAll(){ if(!this.on()) return pop('サーバーのアドレスと合言葉を入力してください');
+    const q=this.q(); (await DB.all('records')).forEach(r=>{ if(!q.r.includes(r.code)) q.r.push(r.code); });
+    const ps=await new Promise((res,rej)=>{ const out=[]; const rq=DB._s('photos','readonly').openKeyCursor(); rq.onsuccess=()=>{ const c=rq.result; if(!c) return res(out); out.push(c.key); c.continue(); }; rq.onerror=()=>rej(rq.error); });
+    ps.forEach(n=>{ if(!q.p.includes(n)) q.p.push(n); }); this.saveQ(q); this.info(`送信中…(記録${q.r.length}件・写真${q.p.length}枚)`); await this.flush(); },
+  init(){ const c=this.cfg(); $('srvUrl').value=c.url||''; $('srvKey').value=c.key||'';
+    const save=()=>{ this.saveCfg({url:$('srvUrl').value.trim(),key:$('srvKey').value.trim()}); this.status(); };
+    $('srvUrl').onchange=save; $('srvKey').onchange=save;
+    $('btnSrvTest').onclick=()=>{ save(); this.test(); }; $('btnSrvSync').onclick=()=>{ save(); this.syncNow(); }; $('btnSrvAll').onclick=()=>{ save(); this.sendAll(); };
+    window.addEventListener('online',()=>this.flush()); setInterval(()=>this.flush(),30000);
+    if(this.on()){ this.status(); this.flush(); } }
+};
+window.SYNC=SYNC;
 
 /* ---------------- 共通 ---------------- */
 const norm = s => String(s==null?'':s).normalize('NFKC').trim().toUpperCase();
@@ -600,7 +663,7 @@ function goTab(t){
 
 /* ---------------- 起動 ---------------- */
 async function init(){
-  await DB.open(); loadSettings(); await loadList(); startGeo();
+  await DB.open(); loadSettings(); await loadList(); startGeo(); SYNC.init();
   try{ navigator.storage&&navigator.storage.persist&&navigator.storage.persist(); }catch(e){}
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>goTab(b.dataset.tab));
   document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>goTab(b.dataset.goto));

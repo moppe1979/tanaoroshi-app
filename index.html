@@ -113,6 +113,18 @@
     </details>
   </div>
   <div class="panel">
+    <h2>保存先サーバー(PostgreSQL)</h2>
+    <p class="note">読み取った記録と写真を、社内のAPIサーバー経由でデータベースに保存します。圏外の時は端末に残り、つながった時に自動で送られます。</p>
+    <label class="note" for="srvUrl">サーバーのアドレス(例: https://172.18.61.232:8443)</label>
+    <input type="url" id="srvUrl" class="txt" autocomplete="off" placeholder="https://...">
+    <label class="note" for="srvKey">合言葉(API_KEY)</label>
+    <input type="password" id="srvKey" class="txt" autocomplete="off">
+    <button class="btn" id="btnSrvTest">接続テスト</button>
+    <button class="btn primary" id="btnSrvSync">今すぐ同期</button>
+    <button class="btn" id="btnSrvAll">この端末の全記録をサーバーへ送る</button>
+    <p class="note" id="srvInfo">未設定(端末内にだけ保存されます)</p>
+  </div>
+  <div class="panel">
     <h2>出力</h2>
     <button class="btn primary" id="btnExcel">回答済みExcelを出力(変更セルは黄色)</button>
     <button class="btn" id="btnZip">写真ZIPを出力</button>
